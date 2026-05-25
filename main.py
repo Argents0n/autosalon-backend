@@ -1,6 +1,5 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from mangum import Mangum
 
 from routers import auth, cars, clients, deals, refs, reports, service, test_drives
 
@@ -31,7 +30,3 @@ app.include_router(test_drives.router)
 @app.get("/")
 async def root():
     return {"status": "ok", "service": "АвтоДилер API v1.0"}
-
-
-# Vercel serverless handler
-handler = Mangum(app, lifespan="off")
