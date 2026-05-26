@@ -71,8 +71,62 @@ async def _enrich_deal(deal: Deal, db: AsyncSession) -> dict:
 
 @router.get("/")
 async def list_deals(db: AsyncSession = Depends(get_db), _: TokenData = Depends(get_current_user)):
-    deals = (await db.execute(select(Deal).order_by(Deal.deal_date.desc()))).scalars().all()
-    return [await _enrich_deal(d, db) for d in deals]
+    # Один JOIN-запрос вместо N×7 отдельных запросов
+    q = (
+        select(
+            Deal,
+            Car.vin,
+            Brand.name.label("brand_name"),
+            Model.name.label("model_name"),
+            Client.full_name.label("client_name"),
+            Employee.full_name.label("employee_name"),
+        )
+        .join(Car,      Deal.car_id      == Car.id)
+        .join(Model,    Car.model_id     == Model.id)
+        .join(Brand,    Model.brand_id   == Brand.id)
+        .join(Client,   Deal.client_id   == Client.id)
+        .join(Employee, Deal.employee_id == Employee.id)
+        .order_by(Deal.deal_date.desc())
+    )
+    rows = (await db.execute(q)).all()
+
+    if not rows:
+        return []
+
+    deal_ids = [row[0].id for row in rows]
+
+    # Платежи и услуги — два bulk-запроса
+    all_payments = (await db.execute(
+        select(Payment).where(Payment.deal_id.in_(deal_ids))
+    )).scalars().all()
+    all_services = (await db.execute(
+        select(DealService).where(DealService.deal_id.in_(deal_ids))
+    )).scalars().all()
+
+    pmts_by_deal = {}
+    for p in all_payments:
+        pmts_by_deal.setdefault(p.deal_id, []).append(p)
+    svcs_by_deal = {}
+    for s in all_services:
+        svcs_by_deal.setdefault(s.deal_id, []).append(s)
+
+    result = []
+    for deal, vin, brand_name, model_name, client_name, employee_name in rows:
+        d = {c.name: getattr(deal, c.name) for c in Deal.__table__.columns}
+        pmts = pmts_by_deal.get(deal.id, [])
+        svcs = svcs_by_deal.get(deal.id, [])
+        paid = sum(float(p.amount) for p in pmts)
+        services_total = sum(float(s.price) for s in svcs)
+        d["car"]       = f"{brand_name} {model_name}"
+        d["vin"]       = vin
+        d["client"]    = client_name
+        d["employee"]  = employee_name
+        d["paid"]      = paid
+        d["remaining"] = float(deal.amount) + services_total - paid
+        d["payments"]  = [{"id": p.id, "amount": float(p.amount), "paid_at": p.paid_at, "method": p.method} for p in pmts]
+        d["services"]  = [{"id": s.id, "service_name": s.service_name, "price": float(s.price)} for s in svcs]
+        result.append(d)
+    return result
 
 
 @router.get("/{deal_id}")

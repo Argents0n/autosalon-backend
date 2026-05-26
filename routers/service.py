@@ -31,6 +31,15 @@ async def list_orders(db: AsyncSession = Depends(get_db), _: TokenData = Depends
     return (await db.execute(select(ServiceOrder).order_by(ServiceOrder.open_date.desc()))).scalars().all()
 
 
+@router.get("/works/all")
+async def list_all_works(db: AsyncSession = Depends(get_db), _: TokenData = Depends(get_current_user)):
+    """Все работы по всем нарядам одним запросом — избегаем N+1."""
+    works = (await db.execute(select(ServiceWork).order_by(ServiceWork.service_order_id))).scalars().all()
+    return [{"id": w.id, "service_order_id": w.service_order_id,
+              "description": w.description, "hours": float(w.hours), "unit_price": float(w.unit_price)}
+             for w in works]
+
+
 @router.get("/{order_id}")
 async def get_order(order_id: int, db: AsyncSession = Depends(get_db), _: TokenData = Depends(get_current_user)):
     o = await db.get(ServiceOrder, order_id)
