@@ -48,7 +48,7 @@ async def list_cars(
         d = {c.name: getattr(car, c.name) for c in Car.__table__.columns}
         d["model"] = model_name
         d["brand"] = brand_name
-        d["body_type"] = body_type.value if body_type else None
+        d["body_type"] = str(body_type) if body_type else None
         result.append(d)
     return result
 
